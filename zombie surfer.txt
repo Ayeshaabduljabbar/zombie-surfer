@@ -1,0 +1,304 @@
+#include "raylib.h"
+#include <stdlib.h>
+#include <time.h>
+
+#define PLAYER_SPEED 5
+#define ZOMBIE_BASE_SPEED 3
+#define ZOMBIE_SPEED_INCREMENT 2
+#define COIN_SPEED 2
+#define NUM_ZOMBIES 3
+#define NUM_COINS 5
+
+typedef struct Player {
+    Vector2 position;
+    float width, height;
+    Texture2D texture;
+    Rectangle rectangle;
+} Player;
+
+typedef struct Zombie {
+    Vector2 position;
+    float width, height;
+    Texture2D texture;
+    Rectangle rectangle;
+} Zombie;
+
+typedef struct Coin {
+    Vector2 position;
+    float radius;
+    Texture2D texture;
+    Rectangle rectangle;
+} Coin;
+
+void UpdatePlayer(Player* player);
+void UpdateZombies(Zombie zombies[], int* zombieCount, int zombieSpeed);
+void UpdateCoins(Coin coins[], int* coinCount);
+void DrawPlayer(Player player);
+void DrawZombies(Zombie zombies[], int zombieCount);
+void DrawCoins(Coin coins[], int coinCount);
+bool CheckButtonClick(Rectangle button);
+
+int main(void) {
+    InitWindow(800, 600, "Zombie Surfer");
+    InitAudioDevice();
+    SetTargetFPS(60);
+
+    // Load textures with updated file paths
+    Texture2D playerTexture = LoadTexture("player.png");
+    Texture2D zombieTexture = LoadTexture("zombie.png");
+    Texture2D coinTexture = LoadTexture("coin.png");
+    Texture2D backgroundTexture = LoadTexture("wasteland.png");
+
+    // Load sounds
+    Sound coinSound = LoadSound("coin.mp3");
+    Sound collisionSound = LoadSound("hit.mp3");
+    Sound gameOverSound = LoadSound("retro end.mp3");
+
+    // Load background music
+    Music backgroundMusic = LoadMusicStream("retro.mp3");
+    PlayMusicStream(backgroundMusic);
+
+    Player player = { .position = {100, 300}, .width = 70, .height = 80, .texture = playerTexture, .rectangle = {100, 300, 70, 80} };
+    Zombie zombies[NUM_ZOMBIES];
+    Coin coins[NUM_COINS];
+    int zombieCount = NUM_ZOMBIES;
+    int coinCount = NUM_COINS;
+    int score = 0;
+    bool gameOver = false;
+    bool gamePaused = false;
+    bool gameStarted = false;  // Flag to track if the game has started
+    bool gameOverSoundPlayed = false;  // Prevent the sound from playing multiple times
+
+    // Button rectangles
+    Rectangle pauseButton = { 740, 10, 50, 30 };
+    Rectangle startButton = { 350, 400, 100, 50 };  // Start button
+
+    srand(time(NULL));
+    for (int i = 0; i < NUM_ZOMBIES; i++) {
+        zombies[i].position = (Vector2){GetScreenWidth() + rand() % 200, rand() % GetScreenHeight()};
+        zombies[i].width = 50;
+        zombies[i].height = 50;
+        zombies[i].texture = zombieTexture;
+        zombies[i].rectangle = (Rectangle){zombies[i].position.x - zombies[i].width / 2, zombies[i].position.y - zombies[i].height / 2, zombies[i].width, zombies[i].height};
+    }
+
+    for (int i = 0; i < NUM_COINS; i++) {
+        coins[i].position = (Vector2){rand() % GetScreenWidth(), rand() % GetScreenHeight()};
+        coins[i].radius = 15;
+        coins[i].texture = coinTexture;
+        coins[i].rectangle = (Rectangle){coins[i].position.x - coins[i].radius, coins[i].position.y - coins[i].radius, coins[i].radius * 2, coins[i].radius * 2};
+    }
+
+    while (!WindowShouldClose()) {
+        // Update music stream
+        UpdateMusicStream(backgroundMusic);
+
+        // Handle the start screen
+        if (!gameStarted) {
+            BeginDrawing();
+            ClearBackground(RAYWHITE);
+
+            // Draw the background as the start screen
+            DrawTexture(backgroundTexture, 0, 0, WHITE);  // Start screen background
+
+            // Draw the "Zombie Surfer" title in red
+            DrawText("Zombie Surfer", 280, 200, 50, RED);
+
+            // Draw start button with black background and white bold text
+            DrawRectangleRec(startButton, BLACK);
+            DrawText("START", 370, 415, 20, WHITE);
+
+            if (CheckButtonClick(startButton)) {
+                gameStarted = true;  // Start the game when the start button is clicked
+                gameOver = false;  // Reset game over state
+                score = 0;  // Reset score
+                gameOverSoundPlayed = false;  // Ensure sound can play again
+            }
+
+            EndDrawing();
+            continue;  // Skip the rest of the game loop and wait for the user to click "START"
+        }
+
+        // Handle pause
+        if (CheckButtonClick(pauseButton)) gamePaused = !gamePaused;
+        if (gamePaused) {
+            BeginDrawing();
+            ClearBackground(RAYWHITE);
+            DrawText("Paused", 360, 250, 30, DARKGRAY);
+            DrawRectangleRec(pauseButton, BLACK);
+            DrawText("PAUSE", 745, 15, 15, WHITE);
+            EndDrawing();
+            continue;
+        }
+
+        if (!gameOver) {
+            UpdatePlayer(&player);
+
+            // Set zombie speed based on score
+            int zombieSpeed = (score >= 100) ? ZOMBIE_BASE_SPEED + ZOMBIE_SPEED_INCREMENT : ZOMBIE_BASE_SPEED;
+            UpdateZombies(zombies, &zombieCount, zombieSpeed);
+            UpdateCoins(coins, &coinCount);
+
+            for (int i = 0; i < NUM_ZOMBIES; i++) {
+                if (CheckCollisionRecs(player.rectangle, zombies[i].rectangle)) {
+                    PlaySound(collisionSound);  // Play collision sound
+                    gameOver = true;
+                }
+            }
+
+            for (int i = 0; i < NUM_COINS; i++) {
+                if (CheckCollisionCircleRec(coins[i].position, coins[i].radius, player.rectangle)) {
+                    score += 10;
+                    PlaySound(coinSound);  // Play coin collection sound
+                    coins[i].position = (Vector2){rand() % GetScreenWidth(), rand() % GetScreenHeight()};
+                    coins[i].rectangle.x = coins[i].position.x - coins[i].radius;
+                    coins[i].rectangle.y = coins[i].position.y - coins[i].radius;
+                }
+            }
+        }
+
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+        DrawTexture(backgroundTexture, 0, 0, WHITE);  // Draw background during game
+
+        if (gameOver) {
+            if (!gameOverSoundPlayed) {
+                StopMusicStream(backgroundMusic);
+                PlaySound(gameOverSound);  // Play game over sound
+                gameOverSoundPlayed = true;  // Ensure sound plays only once
+            }
+            DrawText("GAME OVER", 320, 250, 40, RED);
+            DrawText(TextFormat("You Scored: %d", score), 330, 300, 20, DARKGRAY);
+        } else {
+            DrawPlayer(player);
+            DrawZombies(zombies, NUM_ZOMBIES);
+            DrawCoins(coins, NUM_COINS);
+            DrawText(TextFormat("Score: %d", score), 10, 10, 20, DARKGRAY);
+
+            // Draw pause button with black background and white bold text
+            DrawRectangleRec(pauseButton, BLACK);
+            DrawText("PAUSE", 745, 15, 15, WHITE);
+        }
+
+        EndDrawing();
+    }
+
+    // Unload resources
+    UnloadTexture(playerTexture);
+    UnloadTexture(zombieTexture);
+    UnloadTexture(coinTexture);
+    UnloadTexture(backgroundTexture);
+    UnloadSound(coinSound);  // Unload sound resources
+    UnloadSound(collisionSound);
+    UnloadSound(gameOverSound);
+    UnloadMusicStream(backgroundMusic);    // Unload background music
+    CloseAudioDevice();
+    CloseWindow();
+
+    return 0;
+}
+
+void UpdatePlayer(Player* player) {
+    if (IsKeyDown(KEY_RIGHT)) player->position.x += PLAYER_SPEED;
+    if (IsKeyDown(KEY_LEFT)) player->position.x -= PLAYER_SPEED;
+    if (IsKeyDown(KEY_UP)) player->position.y -= PLAYER_SPEED;
+    if (IsKeyDown(KEY_DOWN)) player->position.y += PLAYER_SPEED;
+
+    // Apply screen boundaries
+    if (player->position.x < 0) player->position.x = 0;
+    if (player->position.y < 0) player->position.y = 0;
+    if (player->position.x + player->width > GetScreenWidth()) player->position.x = GetScreenWidth() - player->width;
+    if (player->position.y + player->height > GetScreenHeight()) player->position.y = GetScreenHeight() - player->height;
+
+  // Update the player's rectangle based on position
+    player->rectangle.x = player->position.x;
+    player->rectangle.y = player->position.y;
+}
+
+void UpdateZombies(Zombie zombies[], int* zombieCount, int score) {
+    int speed = (score >= 100) ? ZOMBIE_BASE_SPEED + ZOMBIE_SPEED_INCREMENT : ZOMBIE_BASE_SPEED;
+    for (int i = 0; i < NUM_ZOMBIES; i++) {
+        // Update zombie position
+        zombies[i].position.x -= speed;
+        
+        // If zombie moves off the left edge, reset its position to the right side within bounds
+        if (zombies[i].position.x < -zombies[i].width) {
+            zombies[i].position.x = GetScreenWidth() + rand() % 200;
+            zombies[i].position.y = rand() % GetScreenHeight();
+        }
+
+        // Prevent zombie from going off the top of the screen
+        if (zombies[i].position.y < 0) {
+            zombies[i].position.y = 0;
+        }
+        
+        // Prevent zombie from going off the bottom of the screen
+        if (zombies[i].position.y + zombies[i].height > GetScreenHeight()) {
+            zombies[i].position.y = GetScreenHeight() - zombies[i].height;
+        }
+
+        // Update the rectangle for collision detection 
+        zombies[i].rectangle.x = zombies[i].position.x;
+        zombies[i].rectangle.y = zombies[i].position.y;
+        zombies[i].rectangle.width = zombies[i].width * 1.6f;  // Increase width for collision area
+        zombies[i].rectangle.height = zombies[i].height * 1.6f;  // Increase height for collision area
+    }
+}
+void UpdateCoins(Coin coins[], int* coinCount) {
+    for (int i = 0; i < *coinCount; i++) {
+        // Move coin left by COIN_SPEED
+        coins[i].position.x -= COIN_SPEED;
+
+        // If the coin goes off the screen, respawn it on the right side
+        if (coins[i].position.x < -coins[i].radius) {
+            coins[i].position.x = GetScreenWidth() + rand() % 200;  // Randomly respawn at the right side of the screen
+            coins[i].position.y = rand() % GetScreenHeight();       // Random y position within the screen height
+        }
+
+        // Update the rectangle's size to match the coin texture
+        coins[i].rectangle.x = coins[i].position.x - coins[i].radius;
+        coins[i].rectangle.y = coins[i].position.y - coins[i].radius;
+
+        // Set rectangle dimensions to the size of the texture (assuming coin is a square texture)
+        coins[i].rectangle.width = coins[i].texture.width;  // Match the texture width
+        coins[i].rectangle.height = coins[i].texture.height; // Match the texture height
+    }
+}
+
+void DrawCoins(Coin coins[], int coinCount) {
+    // Draw each coin texture at their current position
+    for (int i = 0; i < coinCount; i++) {
+        // Center the texture inside the rectangle
+        Vector2 texturePosition = {
+            coins[i].position.x - coins[i].texture.width / 2,  // Adjust x to center the texture
+            coins[i].position.y - coins[i].texture.height / 2 // Adjust y to center the texture
+        };
+        DrawTextureEx(coins[i].texture, texturePosition, 0.0f, 1.0f, YELLOW);
+    }
+}
+void DrawPlayer(Player player) {
+    // Draw the player texture at the player's position
+    DrawTextureEx(player.texture, player.position, 0.0f, 1.0f, WHITE);
+    // Draw player rectangle for debugging
+    DrawRectangleLinesEx(player.rectangle, 2, BLUE);
+}
+
+void DrawZombies(Zombie zombies[], int zombieCount) {
+    // Draw each zombie texture centered inside its rectangle
+    for (int i = 0; i < zombieCount; i++) {
+        // Adjust the position to center the texture inside the rectangle
+        Vector2 texturePosition = {
+            zombies[i].position.x - zombies[i].width / 2,
+            zombies[i].position.y - zombies[i].height / 2
+        };
+        DrawTextureEx(zombies[i].texture, texturePosition, 0.0f, 1.0f, WHITE);
+
+        // Draw zombie rectangle for debugging
+        DrawRectangleLinesEx(zombies[i].rectangle, 2, GREEN);
+    }
+}
+
+bool CheckButtonClick(Rectangle button) {
+    // Check if mouse click is inside the button's rectangle
+    return (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), button));
+}
